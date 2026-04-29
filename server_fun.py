@@ -1,24 +1,43 @@
-# server_fun.py
 from mcp.server.fastmcp import FastMCP
-from typing import Optional, Dict, Any, List
+from typing import Dict, Any, List
 import requests, html
 
 mcp = FastMCP("FunTools")
 
 # ---- Weather (Open-Meteo) ----
 @mcp.tool()
-def get_weather(latitude: float, longitude: float) -> Dict[str, Any]:
-    """Current weather at coordinates via Open-Meteo."""
+def get_weather(lat: float, lon: float) -> dict:
+    """
+    Get current temperature for given latitude and longitude.
+    """
     url = "https://api.open-meteo.com/v1/forecast"
     params = {
-        "latitude": latitude,
-        "longitude": longitude,
-        "current": "temperature_2m,weather_code,wind_speed_10m",
-        "timezone": "auto",
+        "latitude": lat,
+        "longitude": lon,
+        "current": ["temperature_2m", "wind_speed_10m", "weather_code"],
     }
-    r = requests.get(url, params=params, timeout=20)
+
+    r = requests.get(url, params=params, timeout=10)
     r.raise_for_status()
-    return r.json().get("current", {})
+
+    data = r.json()
+    current = data.get("current")
+
+    if not current or "temperature_2m" not in current:
+        return {
+            "error": "no_temperature_data",
+            "location": {"lat": lat, "lon": lon},
+            "raw": current,
+        }
+
+    return {
+        "location": {"lat": lat, "lon": lon},
+        "temperature_c": current["temperature_2m"],
+        "wind_speed_kmh": current.get("wind_speed_10m"),
+        "weather_code": current.get("weather_code"),
+        "time": current.get("time"),
+        "source": "open-meteo",
+    }
 
 # ---- Book recs (Open Library) ----
 @mcp.tool()
@@ -62,34 +81,12 @@ def trivia() -> Dict[str, Any]:
     r = requests.get("https://opentdb.com/api.php?amount=1&type=multiple", timeout=20)
     r.raise_for_status()
     data = r.json().get("results", [])
-    if not data:
-        return {"error": "no trivia"}
+    if not data: return {"error": "no trivia"}
     q = data[0]
     q["question"] = html.unescape(q["question"])
     q["correct_answer"] = html.unescape(q["correct_answer"])
     q["incorrect_answers"] = [html.unescape(x) for x in q["incorrect_answers"]]
     return q
-
-# ---- City to Coordinates (Open-Meteo Geocoding) -- STRETCH GOAL ----
-@mcp.tool()
-def city_to_coords(city: str) -> Dict[str, Any]:
-    """Convert a city name to latitude/longitude via Open-Meteo Geocoding API."""
-    r = requests.get(
-        "https://geocoding-api.open-meteo.com/v1/search",
-        params={"name": city, "count": 1, "language": "en", "format": "json"},
-        timeout=20,
-    )
-    r.raise_for_status()
-    results = r.json().get("results", [])
-    if not results:
-        return {"error": f"Could not find coordinates for '{city}'"}
-    match = results[0]
-    return {
-        "city": match.get("name"),
-        "country": match.get("country"),
-        "latitude": match.get("latitude"),
-        "longitude": match.get("longitude"),
-    }
 
 if __name__ == "__main__":
     mcp.run()  # stdio server
